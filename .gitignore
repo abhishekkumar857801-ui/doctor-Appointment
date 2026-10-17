@@ -62,3 +62,19 @@ app.*.map.json
 # Firebase Admin SDK service-account credentials
 service-account*.json
 *-firebase-adminsdk-*.json
+# Firebase local configuration and debug files
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+
+# Local IDE settings
+.vscode/
+
+# Google Cloud credentials
+application_default_credentials.json
+
+# Node.js / Firebase Functions
+functions/node_modules/
+functions/.env
+functions/.env.*
+!functions/.env.example

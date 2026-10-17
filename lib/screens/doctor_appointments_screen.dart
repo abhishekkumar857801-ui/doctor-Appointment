@@ -13,53 +13,63 @@ class DoctorAppointmentsScreen extends StatefulWidget {
 
 class _DoctorAppointmentsScreenState
     extends State<DoctorAppointmentsScreen> {
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final FirebaseFirestore _db = FirebaseFirestore.instance;
 
-  bool _loading = true;
   String? _doctorId;
+  String? _doctorName;
   String? _error;
+  bool _loading = true;
 
   @override
   void initState() {
     super.initState();
-    _loadDoctorProfile();
+    _findDoctor();
   }
 
-  Future<void> _loadDoctorProfile() async {
+  Future<void> _findDoctor() async {
     try {
-      final user = _auth.currentUser;
+      final user = FirebaseAuth.instance.currentUser;
 
       if (user == null) {
-        throw Exception('Please log in again.');
+        throw Exception('No logged-in user. Please log in again.');
       }
 
-      final result = await _firestore
+      // First, search for legacy and newer profiles by ownerUid.
+      final result = await _db
           .collection('doctors')
           .where('ownerUid', isEqualTo: user.uid)
           .limit(1)
           .get();
 
-      if (result.docs.isEmpty) {
-        throw Exception(
-          'No doctor profile is linked to this account. '
-              'Check the ownerUid field in Firestore.',
-        );
+      if (result.docs.isNotEmpty) {
+        final doctor = result.docs.first;
+        _doctorId = doctor.id;
+        _doctorName = doctor.data()['name']?.toString();
+      } else {
+        // New profiles may use the Firebase UID as document ID.
+        final direct =
+        await _db.collection('doctors').doc(user.uid).get();
+
+        if (direct.exists) {
+          _doctorId = direct.id;
+          _doctorName = direct.data()?['name']?.toString();
+        } else {
+          throw Exception(
+            'Doctor profile not found. Check that the doctor document '
+                'ownerUid equals your logged-in Firebase UID (${user.uid}), '
+                'or that its document ID equals your UID.',
+          );
+        }
       }
 
-      if (!mounted) return;
-
-      setState(() {
-        _doctorId = result.docs.first.id;
-        _loading = false;
-      });
+      debugPrint('Logged-in doctor UID: ${user.uid}');
+      debugPrint('Doctor document ID: $_doctorId');
+      debugPrint('Doctor name: $_doctorName');
     } catch (e) {
-      if (!mounted) return;
-
-      setState(() {
-        _error = e.toString();
-        _loading = false;
-      });
+      _error = e.toString();
+      debugPrint('FIND DOCTOR ERROR: $e');
+    } finally {
+      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -68,239 +78,182 @@ class _DoctorAppointmentsScreenState
       String status,
       ) async {
     try {
-      await _firestore
-          .collection('appointments')
-          .doc(appointmentId)
-          .update({'status': status});
+      await _db.collection('appointments').doc(appointmentId).update({
+        'status': status,
+      });
 
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            status == 'approved'
-                ? 'Appointment approved successfully.'
-                : 'Appointment rejected.',
-          ),
-        ),
+        SnackBar(content: Text('Appointment $status successfully')),
       );
     } catch (e) {
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Unable to update appointment: $e'),
-        ),
+        SnackBar(content: Text('Could not update appointment: $e')),
       );
+
+      debugPrint('UPDATE APPOINTMENT ERROR: $e');
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    const primary = Color(0xFF176B87);
+    if (_loading) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Doctor Appointments')),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Patient Appointments'),
-        backgroundColor: primary,
-        foregroundColor: Colors.white,
-      ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _error != null
-          ? Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Text(
-            _error!,
-            textAlign: TextAlign.center,
+    if (_error != null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Doctor Appointments')),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Text(_error!, textAlign: TextAlign.center),
           ),
         ),
-      )
-          : StreamBuilder<
-          QuerySnapshot<Map<String, dynamic>>>(
-        stream: _firestore
-            .collection('appointments')
-            .where('doctorId', isEqualTo: _doctorId)
-            .snapshots(),
-        builder: (context, snapshot) {
-          if (snapshot.hasError) {
-            return const Center(
-              child: Padding(
-                padding: EdgeInsets.all(24),
-                child: Text(
-                  'Unable to load appointments. '
-                      'Check Firestore rules and your connection.',
-                  textAlign: TextAlign.center,
-                ),
-              ),
-            );
-          }
+      );
+    }
 
-          if (snapshot.connectionState ==
-              ConnectionState.waiting) {
-            return const Center(
-              child: CircularProgressIndicator(),
-            );
-          }
-
-          final docs = snapshot.data?.docs ?? [];
-
-          if (docs.isEmpty) {
-            return const Center(
-              child: Text(
-                'No appointments found.',
-                style: TextStyle(fontSize: 16),
-              ),
-            );
-          }
-
-          final appointments = [...docs];
-
-          appointments.sort((a, b) {
-            final aDate =
-            a.data()['appointmentDateTime'] as Timestamp?;
-            final bDate =
-            b.data()['appointmentDateTime'] as Timestamp?;
-
-            return (aDate?.millisecondsSinceEpoch ?? 0)
-                .compareTo(
-              bDate?.millisecondsSinceEpoch ?? 0,
-            );
-          });
-
-          return ListView.builder(
-            padding: const EdgeInsets.all(16),
-            itemCount: appointments.length,
-            itemBuilder: (context, index) {
-              final doc = appointments[index];
-              final data = doc.data();
-
-              final patientId =
-                  data['patientId'] as String? ?? 'Unknown';
-              final doctorName =
-                  data['doctorName'] as String? ?? 'Doctor';
-              final specialization =
-                  data['specialization'] as String? ?? '';
-              final status =
-                  data['status'] as String? ?? 'pending';
-
-              final timestamp =
-              data['appointmentDateTime'] as Timestamp?;
-
-              final dateTime = timestamp?.toDate();
-              final isPending = status == 'pending';
-
-              final statusColor = switch (status) {
-                'approved' => Colors.green,
-                'rejected' || 'cancelled' => Colors.red,
-                _ => Colors.orange,
-              };
-
-              return Card(
-                margin: const EdgeInsets.only(bottom: 16),
-                elevation: 2,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment:
-                    CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        doctorName,
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
+    return Scaffold(
+      appBar: AppBar(title: const Text('Doctor Appointments')),
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Text(
+              'Doctor: ${_doctorName ?? "Doctor"}\n'
+                  'Document ID: $_doctorId',
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+          ),
+          const Divider(height: 1),
+          Expanded(
+            child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+              stream: _db
+                  .collection('appointments')
+                  .where('doctorId', isEqualTo: _doctorId)
+                  .snapshots(),
+              builder: (context, snapshot) {
+                if (snapshot.hasError) {
+                  return Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Text(
+                        'Unable to load appointments:\n'
+                            '${snapshot.error}',
+                        textAlign: TextAlign.center,
                       ),
-                      const SizedBox(height: 12),
-                      Text('Patient ID: $patientId'),
-                      const SizedBox(height: 6),
-                      Text('Specialization: $specialization'),
-                      const SizedBox(height: 6),
-                      Text(
-                        dateTime == null
-                            ? 'Date: Not available'
-                            : 'Date: ${dateTime.day}/'
-                            '${dateTime.month}/'
-                            '${dateTime.year}',
+                    ),
+                  );
+                }
+
+                if (snapshot.connectionState ==
+                    ConnectionState.waiting) {
+                  return const Center(
+                    child: CircularProgressIndicator(),
+                  );
+                }
+
+                final appointments = snapshot.data?.docs ?? [];
+
+                if (appointments.isEmpty) {
+                  return const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(24),
+                      child: Text(
+                        'No appointments found for this doctor.\n\n'
+                            'Check that a patient booking exists and its '
+                            'doctorId matches the document ID shown above.',
+                        textAlign: TextAlign.center,
                       ),
-                      if (dateTime != null) ...[
-                        const SizedBox(height: 6),
-                        Text(
-                          'Time: ${TimeOfDay.fromDateTime(dateTime).format(context)}',
-                        ),
-                      ],
-                      const SizedBox(height: 12),
-                      Row(
-                        children: [
-                          const Text('Status: '),
-                          Text(
-                            status.toUpperCase(),
-                            style: TextStyle(
-                              color: statusColor,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ],
-                      ),
-                      if (isPending) ...[
-                        const SizedBox(height: 16),
-                        Row(
+                    ),
+                  );
+                }
+
+                return ListView.builder(
+                  padding: const EdgeInsets.all(12),
+                  itemCount: appointments.length,
+                  itemBuilder: (context, index) {
+                    final doc = appointments[index];
+                    final data = doc.data();
+
+                    final patientId =
+                        data['patientId']?.toString() ?? 'Unknown';
+                    final status =
+                        data['status']?.toString() ?? 'pending';
+                    final specialization =
+                        data['specialization']?.toString() ?? '';
+                    final dateValue = data['appointmentDateTime'];
+
+                    String dateText = 'Date not available';
+
+                    if (dateValue is Timestamp) {
+                      dateText = dateValue
+                          .toDate()
+                          .toLocal()
+                          .toString();
+                    }
+
+                    return Card(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      child: Padding(
+                        padding: const EdgeInsets.all(14),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Expanded(
-                              child: ElevatedButton.icon(
-                                onPressed: () =>
-                                    _updateStatus(
-                                      doc.id,
-                                      'approved',
-                                    ),
-                                icon: const Icon(
-                                  Icons.check,
-                                ),
-                                label: const Text('Approve'),
-                                style:
-                                ElevatedButton.styleFrom(
-                                  backgroundColor:
-                                  Colors.green,
-                                  foregroundColor:
-                                  Colors.white,
-                                ),
-                              ),
+                            Text(
+                              'Appointment ${doc.id}',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleMedium,
                             ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: ElevatedButton.icon(
-                                onPressed: () =>
-                                    _updateStatus(
-                                      doc.id,
-                                      'rejected',
+                            const SizedBox(height: 8),
+                            Text('Patient UID: $patientId'),
+                            Text('Specialization: $specialization'),
+                            Text('Date: $dateText'),
+                            Text('Status: $status'),
+                            if (status == 'pending') ...[
+                              const SizedBox(height: 12),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: ElevatedButton(
+                                      onPressed: () => _updateStatus(
+                                        doc.id,
+                                        'approved',
+                                      ),
+                                      child: const Text('Approve'),
                                     ),
-                                icon: const Icon(
-                                  Icons.close,
-                                ),
-                                label: const Text('Reject'),
-                                style:
-                                ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.red,
-                                  foregroundColor:
-                                  Colors.white,
-                                ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: OutlinedButton(
+                                      onPressed: () => _updateStatus(
+                                        doc.id,
+                                        'rejected',
+                                      ),
+                                      child: const Text('Reject'),
+                                    ),
+                                  ),
+                                ],
                               ),
-                            ),
+                            ],
                           ],
                         ),
-                      ],
-                    ],
-                  ),
-                ),
-              );
-            },
-          );
-        },
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ],
       ),
     );
   }

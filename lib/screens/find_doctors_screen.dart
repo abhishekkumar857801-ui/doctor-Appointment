@@ -9,13 +9,9 @@ class FindDoctorsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const primary = Color(0xFF176B87);
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('Find Doctors'),
-        backgroundColor: primary,
-        foregroundColor: Colors.white,
       ),
       body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
         stream: FirebaseFirestore.instance
@@ -23,11 +19,11 @@ class FindDoctorsScreen extends StatelessWidget {
             .snapshots(),
         builder: (context, snapshot) {
           if (snapshot.hasError) {
-            return const Center(
+            return Center(
               child: Padding(
-                padding: EdgeInsets.all(24),
+                padding: const EdgeInsets.all(16),
                 child: Text(
-                  'Unable to load doctors. Please try again.',
+                  'Firestore error:\n${snapshot.error}',
                   textAlign: TextAlign.center,
                 ),
               ),
@@ -40,149 +36,101 @@ class FindDoctorsScreen extends StatelessWidget {
             );
           }
 
-          final doctors = snapshot.data?.docs ?? [];
+          final docs = snapshot.data?.docs ?? [];
 
-          if (doctors.isEmpty) {
+          if (docs.isEmpty) {
             return const Center(
-              child: Text('No doctors available yet.'),
+              child: Text('No doctors found.'),
             );
           }
 
           return ListView.builder(
-            padding: const EdgeInsets.all(16),
-            itemCount: doctors.length,
+            padding: const EdgeInsets.all(12),
+            itemCount: docs.length,
             itemBuilder: (context, index) {
-              final doctorDocument = doctors[index];
-              final doctor = doctorDocument.data();
+              final doc = docs[index];
+              final data = doc.data();
 
-              final name =
-                  doctor['name'] as String? ?? 'Doctor';
-              final specialization =
-                  doctor['specialization'] as String? ??
+              final String name =
+                  data['name']?.toString() ?? 'Unnamed doctor';
+
+              final String specialization =
+                  data['specialization']?.toString() ??
                       'Not specified';
-              final qualification =
-                  doctor['qualification'] as String? ??
+
+              final String qualification =
+                  data['qualification']?.toString() ??
                       'Not specified';
-              final experience = doctor['experience'];
-              final available = doctor['available'] == true;
+
+              final bool isAvailable =
+                  data['available'] == true;
+
+              final String approvalStatus =
+                  data['approvalStatus']
+                      ?.toString()
+                      .toLowerCase() ??
+                      'missing';
+
+              final bool isApproved =
+                  approvalStatus == 'approved';
+
+              final bool canBook =
+                  isAvailable && isApproved;
 
               return Card(
-                margin: const EdgeInsets.only(bottom: 16),
-                elevation: 3,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
+                margin: const EdgeInsets.only(bottom: 12),
                 child: Padding(
                   padding: const EdgeInsets.all(16),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Row(
-                        children: [
-                          const CircleAvatar(
-                            radius: 28,
-                            backgroundColor: Color(0xFFDDF3F7),
-                            child: Icon(
-                              Icons.medical_services,
-                              color: primary,
-                              size: 30,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Text(
-                              name,
-                              style: const TextStyle(
-                                fontSize: 19,
-                                fontWeight: FontWeight.bold,
-                                color: Color(0xFF17324D),
-                              ),
-                            ),
-                          ),
-                        ],
+                      Text(
+                        name,
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleMedium,
                       ),
-
-                      const SizedBox(height: 16),
-
-                      _buildDetail(
-                        Icons.local_hospital_outlined,
-                        'Specialization',
-                        specialization,
+                      const SizedBox(height: 8),
+                      Text('Specialization: $specialization'),
+                      Text('Qualification: $qualification'),
+                      Text(
+                        'Availability: '
+                            '${isAvailable ? 'Available' : 'Unavailable'}',
                       ),
-                      const SizedBox(height: 10),
-
-                      _buildDetail(
-                        Icons.school_outlined,
-                        'Qualification',
-                        qualification,
+                      Text(
+                        'Approval: $approvalStatus',
                       ),
-                      const SizedBox(height: 10),
+                      const SizedBox(height: 12),
 
-                      _buildDetail(
-                        Icons.work_outline,
-                        'Experience',
-                        experience == null
-                            ? 'Not specified'
-                            : '$experience years',
-                      ),
-                      const SizedBox(height: 16),
+                      if (!canBook)
+                        const Text(
+                          'Booking unavailable: the doctor must '
+                              'be approved and available.',
+                          style: TextStyle(color: Colors.red),
+                        ),
 
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.circle,
-                            size: 12,
-                            color: available
-                                ? Colors.green
-                                : Colors.red,
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            available
-                                ? 'Available'
-                                : 'Not available',
-                            style: TextStyle(
-                              color: available
-                                  ? Colors.green
-                                  : Colors.red,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ),
-
-                      const SizedBox(height: 16),
+                      const SizedBox(height: 8),
 
                       SizedBox(
                         width: double.infinity,
-                        child: ElevatedButton.icon(
-                          onPressed: available
+                        child: ElevatedButton(
+                          onPressed: canBook
                               ? () {
-                            Navigator.of(context).push(
+                            Navigator.push(
+                              context,
                               MaterialPageRoute(
                                 builder: (_) =>
                                     BookAppointmentScreen(
-                                      doctorId: doctorDocument.id,
+                                      doctorId: doc.id,
                                       doctorName: name,
-                                      specialization: specialization,
+                                      specialization:
+                                      specialization,
                                     ),
                               ),
                             );
                           }
                               : null,
-                          icon: const Icon(Icons.calendar_month),
-                          label: const Text('Book Appointment'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: primary,
-                            foregroundColor: Colors.white,
-                            disabledBackgroundColor: Colors.grey.shade300,
-                            padding: const EdgeInsets.symmetric(
-                              vertical: 14,
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                          ),
+                          child: const Text('Book Appointment'),
                         ),
                       ),
                     ],
@@ -193,30 +141,6 @@ class FindDoctorsScreen extends StatelessWidget {
           );
         },
       ),
-    );
-  }
-
-  static Widget _buildDetail(
-      IconData icon,
-      String label,
-      String value,
-      ) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Icon(
-          icon,
-          size: 20,
-          color: const Color(0xFF176B87),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Text(
-            '$label: $value',
-            style: const TextStyle(fontSize: 14),
-          ),
-        ),
-      ],
     );
   }
 }

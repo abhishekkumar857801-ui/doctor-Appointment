@@ -15,6 +15,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
 
+  final _specializationController = TextEditingController();
+  final _qualificationController = TextEditingController();
+  final _experienceController = TextEditingController();
+  final _feeController = TextEditingController();
+  final _bioController = TextEditingController();
+
   final AuthService _authService = AuthService();
 
   String _role = 'patient';
@@ -26,8 +32,21 @@ class _RegisterScreenState extends State<RegisterScreen> {
     _nameController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
+    _specializationController.dispose();
+    _qualificationController.dispose();
+    _experienceController.dispose();
+    _feeController.dispose();
+    _bioController.dispose();
     super.dispose();
   }
+
+  String? _requiredValidator(String? value, String field) {
+    if (value == null || value.trim().isEmpty) {
+      return 'Please enter $field';
+    }
+    return null;
+  }
+
 
   Future<void> _register() async {
     if (!_formKey.currentState!.validate()) return;
@@ -36,30 +55,74 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
     try {
       await _authService.register(
-        name: _nameController.text,
-        email: _emailController.text,
+        name: _nameController.text.trim(),
+        email: _emailController.text.trim(),
         password: _passwordController.text,
         role: _role,
+        specialization: _role == 'doctor'
+            ? _specializationController.text
+            : null,
+        qualification: _role == 'doctor'
+            ? _qualificationController.text
+            : null,
+        experience: _role == 'doctor'
+            ? int.tryParse(_experienceController.text.trim())
+            : null,
+        consultationFee: _role == 'doctor'
+            ? double.tryParse(_feeController.text.trim())
+            : null,
+        bio: _role == 'doctor' ? _bioController.text : null,
       );
+
+      if (!mounted) return;
+
+      await _authService.logout();
 
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Account created successfully!'),
+          content: Text('Registration successful! Please log in.'),
         ),
       );
 
       Navigator.of(context).pop();
-    } on Exception catch (e) {
+    } catch (e) {
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Registration failed: $e')),
+        SnackBar(
+          content: Text('Registration failed: $e'),
+          duration: const Duration(seconds: 10),
+        ),
       );
+
+      debugPrint('REGISTRATION ERROR: $e');
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+
+  Widget _textField({
+    required TextEditingController controller,
+    required String label,
+    required IconData icon,
+    String? Function(String?)? validator,
+    TextInputType keyboardType = TextInputType.text,
+    int maxLines = 1,
+  }) {
+    return TextFormField(
+      controller: controller,
+      keyboardType: keyboardType,
+      maxLines: maxLines,
+      decoration: InputDecoration(
+        labelText: label,
+        prefixIcon: Icon(icon),
+        border: const OutlineInputBorder(),
+      ),
+      validator: validator,
+    );
   }
 
   @override
@@ -98,30 +161,19 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   ),
                   const SizedBox(height: 28),
 
-                  TextFormField(
+                  _textField(
                     controller: _nameController,
-                    decoration: const InputDecoration(
-                      labelText: 'Full Name',
-                      prefixIcon: Icon(Icons.person_outline),
-                      border: OutlineInputBorder(),
-                    ),
-                    validator: (value) {
-                      if (value == null || value.trim().isEmpty) {
-                        return 'Please enter your name';
-                      }
-                      return null;
-                    },
+                    label: 'Full Name',
+                    icon: Icons.person_outline,
+                    validator: (v) => _requiredValidator(v, 'your name'),
                   ),
                   const SizedBox(height: 16),
 
-                  TextFormField(
+                  _textField(
                     controller: _emailController,
+                    label: 'Email Address',
+                    icon: Icons.email_outlined,
                     keyboardType: TextInputType.emailAddress,
-                    decoration: const InputDecoration(
-                      labelText: 'Email Address',
-                      prefixIcon: Icon(Icons.email_outlined),
-                      border: OutlineInputBorder(),
-                    ),
                     validator: (value) {
                       if (value == null ||
                           !RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
@@ -182,14 +234,92 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         child: Text('Doctor'),
                       ),
                     ],
-                    onChanged: (value) {
+                    onChanged: _loading
+                        ? null
+                        : (value) {
                       if (value != null) {
                         setState(() => _role = value);
                       }
                     },
                   ),
-                  const SizedBox(height: 24),
 
+                  if (_role == 'doctor') ...[
+                    const SizedBox(height: 24),
+                    const Divider(),
+                    const Text(
+                      'Professional Details',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+
+                    _textField(
+                      controller: _specializationController,
+                      label: 'Specialization',
+                      icon: Icons.medical_information_outlined,
+                      validator: (v) =>
+                          _requiredValidator(v, 'your specialization'),
+                    ),
+                    const SizedBox(height: 16),
+
+                    _textField(
+                      controller: _qualificationController,
+                      label: 'Qualification',
+                      icon: Icons.school_outlined,
+                      validator: (v) =>
+                          _requiredValidator(v, 'your qualification'),
+                    ),
+                    const SizedBox(height: 16),
+
+                    _textField(
+                      controller: _experienceController,
+                      label: 'Years of Experience',
+                      icon: Icons.work_outline,
+                      keyboardType: TextInputType.number,
+                      validator: (value) {
+                        final n = int.tryParse(value?.trim() ?? '');
+                        if (n == null || n < 0) {
+                          return 'Enter a valid number of years';
+                        }
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 16),
+
+                    _textField(
+                      controller: _feeController,
+                      label: 'Consultation Fee',
+                      icon: Icons.currency_rupee,
+                      keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                      validator: (value) {
+                        final fee = double.tryParse(value?.trim() ?? '');
+                        if (fee == null || !fee.isFinite || fee < 0) {
+                          return 'Enter a valid consultation fee';
+                        }
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 16),
+
+                    _textField(
+                      controller: _bioController,
+                      label: 'About You (optional)',
+                      icon: Icons.description_outlined,
+                      maxLines: 3,
+                    ),
+                    const SizedBox(height: 12),
+
+                    const Text(
+                      'Your profile will remain unavailable to patients '
+                          'until the admin reviews and approves it.',
+                      style: TextStyle(color: Colors.deepOrange),
+                    ),
+                  ],
+
+                  const SizedBox(height: 24),
                   SizedBox(
                     height: 52,
                     child: FilledButton(
